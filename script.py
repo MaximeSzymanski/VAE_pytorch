@@ -49,35 +49,34 @@ class SamplingLayer(torch.nn.Module):
 
 class VariationalEncoder(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
-        super(VariationalEncoder,self).__init__()
+        super(VariationalEncoder, self).__init__()
         self.conv1 = torch.nn.Conv2d(1, 8, kernel_size=3, stride=2, padding=1)
-        # relu
-        # pooling
+        self.bn1 = torch.nn.BatchNorm2d(8)  # Batch Normalization after the first convolution
         self.conv2 = torch.nn.Conv2d(8, 16, kernel_size=3, stride=2, padding=1)
+        self.bn2 = torch.nn.BatchNorm2d(16)  # Batch Normalization after the second convolution
         self.conv3 = torch.nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)
+        self.bn3 = torch.nn.BatchNorm2d(32)  # Batch Normalization after the third convolution
 
-
-        # relu
-        # pooling
-        # flatten
         self.fc1 = torch.nn.Linear(512, hidden_dim)
         self.mu = torch.nn.Linear(hidden_dim, latent_dim)
         self.logvar = torch.nn.Linear(hidden_dim, latent_dim)
         self.sampling = SamplingLayer()
+        # init logvar to 0
+        self.logvar.weight.data.fill_(0)
+        self.logvar.bias.data.fill_(0)
 
     def forward(self, x):
         original_x = x
-        # x: batch_size * 1 * 28 * 28
         x = self.conv1(x)
-        x = torch.nn.functional.relu(x)
-        # x: batch_size * 32 * 28 * 28
+        x = self.bn1(x)  # Apply Batch Normalization
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = self.conv2(x)
-        x = torch.nn.functional.relu(x)
-        # x: batch_size * 64 * 28 * 28
+        x = self.bn2(x)  # Apply Batch Normalization
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = self.conv3(x)
-        x = torch.nn.functional.relu(x)
+        x = self.bn3(x)  # Apply Batch Normalization
+        x = torch.nn.functional.leaky_relu(x, 0.2)
 
-        # flatten
         x = torch.nn.Flatten(start_dim=1)(x)
         # x: batch_size * 64*7*7
         x = self.fc1(x)
@@ -94,54 +93,41 @@ class VariationalEncoder(torch.nn.Module):
 
         # x: batch_size * latent_dim
         return z, mu, sigma, original_x
+
 class VariationalDecoder(torch.nn.Module):
     def __init__(self, latent_dim, hidden_dim, output_dim):
         super(VariationalDecoder, self).__init__()
         self.hidden_dim = hidden_dim
-        # Fully connected layer
         self.fc1 = torch.nn.Linear(latent_dim, hidden_dim)
-        self.fc2 = torch.nn.Linear(hidden_dim, 3 * 3 * 32 )
+        self.fc2 = torch.nn.Linear(hidden_dim, 3 * 3 * 32)
 
         # Transpose Convolutional layers
         self.t_conv1 = torch.nn.ConvTranspose2d(32, 16, kernel_size=7, stride=2, padding=0)
+        self.bn1 = torch.nn.BatchNorm2d(16)  # Batch Normalization after the first transposed convolution
         self.t_conv2 = torch.nn.ConvTranspose2d(16, 8, kernel_size=7, stride=2, padding=0)
+        self.bn2 = torch.nn.BatchNorm2d(8)  # Batch Normalization after the second transposed convolution
         self.t_conv3 = torch.nn.ConvTranspose2d(8, 1, kernel_size=4, stride=1, padding=1)
 
 
 
     def forward(self, x):
         batch_size = x.size(0)
-
-        # x: batch_size * latent_dim
         x = self.fc1(x)
-        x = torch.nn.functional.leaky_relu(x)
-        # x: batch_size * hidden_dim
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = self.fc2(x)
-        x = torch.nn.functional.relu(x)
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = torch.nn.Unflatten(1, (32, 3, 3))(x)
-        # x: batch_size * hidden_dim * 1 * 1
         x = self.t_conv1(x)
-        x = torch.nn.functional.relu(x)
-        # x: batch_size * 64 * 2 * 2
+        x = self.bn1(x)  # Apply Batch Normalization
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = self.t_conv2(x)
-        x = torch.nn.functional.relu(x)
-        # x: batch_size * 32 * 4 * 4
+        x = self.bn2(x)  # Apply Batch Normalization
+        x = torch.nn.functional.leaky_relu(x, 0.2)
         x = self.t_conv3(x)
         x = torch.nn.functional.sigmoid(x)
 
-        #x = torch.sigmoid(x)
-        # x: batch_size * 1 * 4 * 4
         return x
-class VariationalAutoEncoder(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
-        super(VariationalAutoEncoder, self).__init__()
-        self.encoder = VariationalEncoder(input_dim, hidden_dim, latent_dim)
-        self.decoder = VariationalDecoder(latent_dim, hidden_dim, input_dim)
 
-    def forward(self, x):
-        z, mu, sigma, original_x = self.encoder(x)
-        x = self.decoder(z)
-        return x, mu, sigma, original_x
 
 def KL_loss(mu, sigma):
     return -0.5 * torch.sum(1 + sigma - mu.pow(2) - sigma.exp())
